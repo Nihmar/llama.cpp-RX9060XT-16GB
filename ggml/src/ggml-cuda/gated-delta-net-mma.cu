@@ -385,7 +385,7 @@ static gdn_path select_gdn_mma_path(int device, const ggml_cuda_gdn_mma_args & a
     }
     const auto & info = ggml_cuda_info().devices[device];
 #ifdef GGML_USE_HIP
-    if (!GGML_CUDA_CC_IS_RDNA3_5(info.cc) || a.n_tokens < 2048) {
+    if (!(GGML_CUDA_CC_IS_RDNA3_5(info.cc) || GGML_CUDA_CC_IS_RDNA4(info.cc)) || a.n_tokens < 2048) {
         return gdn_path::ar;
     }
     return init<16, 64>(device) ? gdn_path::slice64 : gdn_path::ar;
