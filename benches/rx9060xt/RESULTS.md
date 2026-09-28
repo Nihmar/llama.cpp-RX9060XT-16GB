@@ -234,6 +234,36 @@ Scelte applicate nei preset:
   -> ~73 t/s di decode (3.7x rispetto a prima) mantenendo un contesto ampio.
 - `math-38-27b-long`: Vulkan, `c = 128000`, K q8_0, MTP+ngram -> 128k pieni, decode ~2x.
 
+## Vulkan: i knob di ambiente non aiutano (il default e' ottimale)
+
+A/B sulla suite base con gemma-4-12b (Vulkan/RADV):
+
+| knob | pp512 @ d8192 | pp8192 @ d8192 | pp32768 @ d8192 | tg128 @ d8192 |
+|---|---:|---:|---:|---:|
+| default | 1031.7 | 962.5 | 697.6 | 35.3 |
+| `GGML_VK_ALLOW_GRAPHICS_QUEUE=1` | 1003.1 | 955.5 | 693.9 | 36.2 |
+| `GGML_VK_DISABLE_ASYNC=1` | 1000.1 | 947.8 | 688.5 | 35.1 |
+| `GGML_VK_DISABLE_COOPMAT=1` | 539.8 | 504.8 | n/d | n/d |
+
+- **coopmat1 e' decisivo**: disabilitarlo dimezza il prefill (-48%). Il percorso
+  FA coopmat1 su RDNA4/RADV e' quello giusto e va lasciato attivo.
+- gli altri knob sono entro +-1-3% e peggiorano il prefill; il +2.8% di decode
+  di ALLOW_GRAPHICS_QUEUE e' dentro la varianza di misura.
+- Verdetto: nessuna variabile d'ambiente da impostare per il lato Vulkan.
+
+## Speculative decoding lato Vulkan (gemma) e confronto a parita' di config
+
+- gemma-4-12b: su codice n-max 3 e' nettamente meglio di n2 (152/144 t/s con
+  acceptance 89% contro 59/58 con 67%); su ragionamento vince n4 (134 vs 103).
+  A differenza del math (SSM) qui i draft profondi non costano memoria
+  (nessuna rs cache): preset portato a **n-max 3**.
+- gemma-4-e4b: n2/n3/n4 indistinguibili (rumore di acceptance).
+- Confronto a parita' di config su g12 (stessi flag spec): HIP 102-137 t/s
+  codice / 134-147 ragionamento, Vulkan 152/103 — i numeri di spec decoding
+  sono dominati dalla varianza di acceptance; il prefill (stabile) resta a
+  favore di Vulkan (+10% in profondita'), quindi la scelta di backend per i
+  gemma regge.
+
 ## MMQ: tre esperimenti, tutti negativi (asse chiuso su HIP)
 
 1. **Tabelle RDNA4 vs RDNA3.5**: a J=128 (il nostro caso con M=512) usano la stessa
