@@ -106,29 +106,52 @@ g4 (Q4_0, ctk/ctv q4_0, ngl 999, @ d8192):
 - La patch FA dkq256 (HIP, gemma) va misurata contro Vulkan come riferimento: se HIP+patch
   supera Vulkan sul prefill profondo dei gemma, il quadro puo' cambiare.
 
-## Patch candidate (branch dedicati)
+## Patch candidate (branch dedicati) - esiti
 
-| branch | patch | target | stato |
-|---|---|---|---|
-| `rx9060xt/patch-fa-dkq256` | PR 26419 portata sul refactor swizzle: WMMA FA per head dim 256, K/V bypass LDS su RDNA4 | prefill profondo gemma | da buildare + bench |
-| `rx9060xt/patch-gdn-chunked` | PR 29353: kernel GDN chunked per il prefill | prefill math (layer SSM) | da buildare + bench |
+| branch | patch | esito |
+|---|---|---|
+| `rx9060xt/patch-fa-dkq256` | PR 26419: WMMA FA head dim 256 + K/V bypass LDS su RDNA4 | **corretta ma nessun guadagno** su g12/g4 (numeri identici al baseline). Motivo: gemma-4 ha head_dim 512 nei layer globali (la patch copre <=256) e 5/6 dei layer sono sliding-window da 1024 token -> l'attenzione non e' il collo di bottiglia del prefill (domina il matmul). Non adottata. |
+| `rx9060xt/patch-gdn-chunked` | PR 29353: kernel GDN chunked per il prefill | **no-op su gfx1200**: il path HIP e' gated a RDNA3.5 (`select_gdn_mma_path`) e richiede n_tokens >= 2048. Correttezza OK (45/45). Tentativo di abilitarlo su RDNA4 (commit `f80830ce9`): il kernel e' compilato solo sotto `AMD_WMMA_AVAILABLE && RDNA3` -> a runtime "HIP kernel gdn_single has no device code compatible with HIP arch 1300". Serve un port vero delle WMMA per gfx12 (layout diversi), fuori scope. |
+
+Nessuna delle due patch e' quindi adottata: i guadagni rimasti sono lato configurazione
+(spec decoding, batch/KV, cache, scelta backend per modello).
+
+## Note di misura (varianza)
+
+- Le righe con prompt grande (pp8192+) sono molto stabili tra run (tipicamente +-0.1%).
+- La **prima** riga della suite scale (`pp512 @ d8192`) ha mostrato fino a **+12% di
+  differenza tra due build identiche** (490 vs 550 t/s): da considerare inaffidabile,
+  non usarla per decisioni. Le stesse righe su Vulkan mostrano lo stesso pattern.
+- Le righe `tg128` sono stabili entro ~1%, tranne alle profondita' maggiori (~2-3%).
 
 ## Log sessioni
 
 ### 2026-09-28
 - baseline HIP: `results/hip-all-base-20260928-172706.md`, `results/hip-{math,g12,g4}-scale-*.md`
 - baseline Vulkan: `results/vulkan-all-base-20260928-173038.md`, `results/vulkan-{math,g12,g4}-scale-*.md`
+- patch FA dkq256: `results/hip-fa-g12-scale-20260928-193029.md` (identico al baseline)
+- patch GDN: `results/hip-gdn-math-scale-20260928-195807.md` (differenze = solo rumore)
 - `-nkvo` e spec decoding: in coda.
 
 ## Da fare
 
-- [ ] build+bench patch FA dkq256 (g12, g4) e patch GDN (math)
+- [x] build+bench patch FA dkq256 (no win) e patch GDN (no-op su gfx1200)
 - [ ] spec decoding: MTP math (ora disattivato), varianti g12 (MTP/DFlash/ngram)
 - [ ] sweep b/ub, threads, cache-ram/cache-reuse
 - [ ] A/B con binario prebuilt lemonade (TheRock, Clang 24) - scaricato in
       `~/.cache/llamacpp-rocm-b1333/extracted`
 - [ ] misura `-nkvo` (muro PCIe per KV in RAM)
 - [ ] install finale (build combinata) + validazione end-to-end
+
+## Harness
+
+- `build.sh hip|vulkan|both` (env `BUILD_SUFFIX` per build dir separate)
+- `bench-models.sh <build> <label> <modello|all> <suite>` - suite: base, scale, kv, batch,
+  threads, fa, nkvo
+- `bench-spec.sh <build> <label> <modello> <nome> -- <args>` - spec decoding via server
+- `bench-spec-matrix.sh <build> <label> [math|g12|g4|all]` - matrice di configurazioni spec
+- `bench-cache.sh <build> <label> <modello> <nome> -- <args>` - riuso prompt multi-turn
+- `install.sh <build-dir>` - installa in ~/.local/bin con backup
 
 ## Convenzioni
 
