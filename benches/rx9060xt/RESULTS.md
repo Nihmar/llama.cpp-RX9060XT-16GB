@@ -154,6 +154,30 @@ llama serve --models-preset ~/.config/llama.cpp/preset.ini --models-max 1 \
 
 (`--threads 12` rimosso: sovrascriveva i `threads` dei preset.)
 
+## Variante IQ3_XXS del math (risparmio ~1 GB di pesi)
+
+La rs cache SSM (~1.8 GB) + MTP non entravano a contesto pieno con IQ3_S. Con IQ3_XXS
+(repo `ISTA-DASLab/Qwen3.8-27B-GSQ-RCO-GGUF:IQ3_XXS`, file `-mtp`) si guadagnano ~1 GB:
+
+| config | ctx | esito |
+|---|---:|---|
+| ROCm + MTP + K q8_0 | 128k | fallisce la creazione del contesto MTP (mancano ~750 MB) |
+| ROCm + MTP + K q8_0 | 120k | carica ma **crash alla prima inferenza** (`CUBLAS_STATUS_ALLOC_FAILED`, workspace hipBLAS) |
+| ROCm + MTP + K q8_0 | **110k** | **ok** (configurazione scelta) |
+| Vulkan + MTP + K q8_0 | **128k** | **ok** |
+
+Decode misurato (XXS, 192 token, /completion, temp 0):
+
+| scenario | ROCm 110k | Vulkan 128k |
+|---|---:|---:|
+| codice, prima generazione | 67.9 t/s (acc 76%) | 53.7 t/s (acc 75%) |
+| ragionamento libero | 32.6 t/s (acc 73%) | 32.2 t/s (acc 79%) |
+| stesso codice rigenerato | 164.8 t/s (acc 98%) | - |
+
+Lettura onesta: su contenuto nuovo il decode e' ~33-68 t/s (base senza spec: 20 t/s);
+il picco ~165 t/s si ha solo quando il testo si ripete (il pool ngram condiviso ha gia'
+visto gli stessi token), tipico del lavoro iterativo su codice.
+
 ## math: contesto vs MTP (VRAM 16 GB, KV q8_0/q4_0 salvo dove indicato)
 
 Il math e' ibrido SSM: la rs cache (stato ricorrente) occupa ~1.8 GB fissi e con MTP
