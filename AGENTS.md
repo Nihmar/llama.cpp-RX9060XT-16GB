@@ -247,3 +247,18 @@ Chat template and parser:
 - [PEG parser](docs/development/parsing.md) - alternative to regex that llama.cpp uses to parse model's output
 - [Auto parser](docs/autoparser.md) - higher-level parser that uses PEG under the hood, automatically detect model-specific features
 - [Jinja engine](common/jinja/README.md)
+
+## Private fork workflow (RX 9060 XT 16GB)
+
+This is a personal, private fork (exempt from the upstream contribution rules above).
+Local optimization conventions:
+
+- `master` mirrors upstream and stays clean; all work goes on `rx9060xt/*` branches.
+- One commit (or branch) per experiment. Code patches get a dedicated branch with a
+  before/after bench in the commit message; reject anything under roughly 5% gain.
+- Harness and raw results live in `benches/rx9060xt/`; the cumulative log is
+  `benches/rx9060xt/RESULTS.md` (commit, build flags, env, params, numbers).
+- Rebuild: `benches/rx9060xt/build.sh hip|vulkan`. Bench: `bench-models.sh` (llama-bench
+  suites), `bench-spec.sh` (speculative decoding via llama-server).
+- Never push, never open PRs/comments on ggml-org from this fork. Target hardware:
+  gfx1200, 16 GB VRAM; mmproj stays on CPU to leave maximum VRAM for the KV cache.
