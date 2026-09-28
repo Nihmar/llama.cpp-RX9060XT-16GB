@@ -31,6 +31,12 @@ declare -A CTK=( [math]="q8_0" [g12]="q8_0" [g4]="q4_0" )
 declare -A CTV=( [math]="q4_0" [g12]="q4_0" [g4]="q4_0" )
 declare -A NGL=( [math]=99 [g12]=999 [g4]=999 )
 
+# draft model per lo spec decoding (passare con: -- -md <path>)
+# - math: MTP integrato nel modello principale (nessun file)
+# - g12:   $M/models--unsloth--gemma-4-12B-it-qat-GGUF/snapshots/980b060c40a8539ac159e0501a3e0f66a6365af3/mtp-gemma-4-12B-it.gguf
+# - g4:    $M/models--unsloth--gemma-4-E4B-it-qat-GGUF/snapshots/8c5a9e4fd5482e2be20fe0bf013b4c262a8f4265/mtp-gemma-4-E4B-it.gguf
+# - g12 dflash: $M/models--williamliao--gemma-4-12B-it-DFlash-GGUF/snapshots/05cc859a6ef67e83e415a6094b9e0b26ec7d8156/gemma-4-12B-it-DFlash-Q4_K_M.gguf
+
 model="${MODELS[$which]}"
 prompt_file="$here/prompts/continue-code.txt"
 [[ -f "$prompt_file" ]] || { echo "manca $prompt_file" >&2; exit 1; }
