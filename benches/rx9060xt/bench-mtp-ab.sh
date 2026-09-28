@@ -18,7 +18,7 @@ run_config() {
   local name="$1"; shift
   echo "== $name =="
   "$srv" -m "$model" -ngl 99 -fa on -ctk q8_0 -ctv q4_0 -c "$ctx" \
-    --device ROCm0 --no-mmproj-offload -t 8 --cache-type-k-draft q4_0 --cache-type-v-draft q4_0 \
+    --device "${DEV:-ROCm0}" --no-mmproj-offload -t 8 --cache-type-k-draft q4_0 --cache-type-v-draft q4_0 \
     --port "$port" "$@" > "$outdir/mtp-ab-$name.srv.log" 2>&1 &
   local pid=$!
   for i in $(seq 1 300); do

@@ -234,6 +234,21 @@ Scelte applicate nei preset:
   -> ~73 t/s di decode (3.7x rispetto a prima) mantenendo un contesto ampio.
 - `math-38-27b-long`: Vulkan, `c = 128000`, K q8_0, MTP+ngram -> 128k pieni, decode ~2x.
 
+## MMQ: tre esperimenti, tutti negativi (asse chiuso su HIP)
+
+1. **Tabelle RDNA4 vs RDNA3.5**: a J=128 (il nostro caso con M=512) usano la stessa
+   riga `(256, 2, 128, 128)` -> nessuna differenza possibile.
+2. **PR 29536 (VGPR)**: portata e misurata -> **-1.4%** (col compilatore AMD i
+   kernel non spillavano).
+3. **J=256** (dimezza il dequant ridondante; riga `(128,2,64,256)`, LDS 55.8 KB
+   <= 64 KB): correttezza OK ma **-17%/-16%** (pp8192 @ d8192: 402 vs 485;
+   pp32768 @ d8192: 371 vs 439 t/s). Con meta' dei blocchi si perde piu'
+   parallelismo di quanto si guadagni in dequant: ecco perche' la soglia
+   upstream e' J=128.
+
+Conclusione: il prefill HIP e' gia' ben calibrato per i nostri quant misti
+(IQ3_S/IQ3_XXS/IQ4_XS); il ~60% del picco MMA e' il tetto pratico.
+
 ## Patch MMQ VGPR (PR 29536) - testata, non adottata
 
 Il PR e' minuscolo (2 file, 11 righe): i builtin bf16 WMMA prendono i bit come
