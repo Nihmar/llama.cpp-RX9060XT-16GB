@@ -133,6 +133,48 @@ Note:
 - math: MTP e' **spento** nel preset attuale; accenderlo e' il singolo guadagno piu' grosso.
 - Le run con ngram hanno alta varianza (dipende da quanto il testo ripete).
 
+## Validazione end-to-end e nota importante sul router
+
+Problema trovato: con backend diversi per modello (math su ROCm, gemma su Vulkan) il router
+con `--models-max 2` tiene **due modelli residenti**; su ROCm non c'e' overcommit della VRAM
+(a differenza di Vulkan, che sfutta la GTT), quindi il secondo caricamento fallisce con
+"unable to allocate ROCm0 buffer" (500) e in un caso anche "device lost" su Vulkan.
+
+Soluzione: **`--models-max 1`**. Verificato: 5/5 richieste ok alternando
+math(ROCm) -> g12(Vulkan) -> math-long(Vulkan) -> e4b(Vulkan) -> math(ROCm), 4-13 s per swap.
+
+Prova: `benches/rx9060xt/validate.sh` (4 modelli, controlla anche i `--device` dei figli).
+
+## Comando serve finale
+
+```bash
+llama serve --models-preset ~/.config/llama.cpp/preset.ini --models-max 1 \
+  --tools all --port 8181 --host 127.0.0.1
+```
+
+(`--threads 12` rimosso: sovrascriveva i `threads` dei preset.)
+
+## math: contesto vs MTP (VRAM 16 GB, KV q8_0/q4_0 salvo dove indicato)
+
+Il math e' ibrido SSM: la rs cache (stato ricorrente) occupa ~1.8 GB fissi e con MTP
+serve una seconda copia. Con `ngl 99` (tutto su GPU) su ROCm:
+
+| config | ctx | decode t/s | accept | prefill t/s | note |
+|---|---:|---:|---:|---:|---|
+| ROCm, senza MTP | 128k | 19.6 | - | 590 | configurazione originale (funziona) |
+| ROCm + MTP | 72k | 82.9 | 81.5% | 531 | massimo contesto con K q8_0 |
+| ROCm + MTP, K q4_0 | 96k | 73.4 | 64.9% | 552 | K q4_0 per far entrare la KV |
+| Vulkan + MTP | 128k | 38.8 (28.9-48.6) | 44.9% | 515-524 | tiene 128k con K q8_0 |
+| ROCm + MTP + KV su host (`--no-kv-offload`) | 128k | 17.8 | 58.8% | **221** | inutilizzabile: prefill via PCIe |
+| ROCm + MTP, `fit` senza ngl | 128k | n/d | - | - | carica ma 43/66 layer su GPU |
+
+Non entrano su ROCm con ngl 99: 128k + MTP (ne' con K q8_0 ne' q4_0), 96k/80k con K q8_0.
+
+Scelte applicate nei preset:
+- `math-38-27b`: ROCm, `c = 92160` (90k, margine sul 96k verificato), `ctk/ctv q4_0`, MTP+ngram
+  -> ~73 t/s di decode (3.7x rispetto a prima) mantenendo un contesto ampio.
+- `math-38-27b-long`: Vulkan, `c = 128000`, K q8_0, MTP+ngram -> 128k pieni, decode ~2x.
+
 ## Patch candidate (branch dedicati) - esiti
 
 | branch | patch | esito |
