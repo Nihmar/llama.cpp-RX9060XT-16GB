@@ -106,6 +106,33 @@ g4 (Q4_0, ctk/ctv q4_0, ngl 999, @ d8192):
 - La patch FA dkq256 (HIP, gemma) va misurata contro Vulkan come riferimento: se HIP+patch
   supera Vulkan sul prefill profondo dei gemma, il quadro puo' cambiare.
 
+## Speculative decoding (prompt: continuazione di codice, /completion 192 token, c 32768)
+
+| modello | config | pred t/s | accept | delta |
+|---|---|---:|---:|---:|
+| math (HIP) | none | 19.6 | - | - |
+| math | draft-mtp n-max 2 | 34.4 | 83.2% | +76% |
+| math | draft-mtp n-max 4 | 32.0 | 67.8% | +63% |
+| math | **draft-mtp + ngram-mod** | **89.0** | 82.5% | **+354%** |
+| g12 (Vulkan) | none | 34.1 | - | - |
+| g12 | draft-mtp n-max 2 (mtp sidecar) | 59.1 | 67.3% | +73% |
+| g12 | draft-mtp n-max 4 | 50.3 | 43.2% | +47% |
+| g12 | ngram-mod (24/48/64) | 111.0 | 94.2% | +225% |
+| g12 | **draft-mtp + ngram-mod** | **117.5** | 74.5% | **+245%** |
+| g12 | draft-dflash (williamliao) n-max 15 | 18.0 | **0.9%** | -47% (inutilizzabile) |
+| g4 (Vulkan) | none | 69.6 | - | - |
+| g4 | draft-mtp n-max 2 | 126.5 | 71.7% | +81% |
+| g4 | **draft-mtp + ngram-mod** | **212.3** | 56.9% | **+204%** |
+
+Note:
+- Il prompt di test e' una continuazione di codice: e' lo scenario migliore per ngram-mod
+  (testo ripetitivo). In chat/reasoning il guadagno sara' inferiore, ma per i flussi
+  agentici su codice e' rappresentativo.
+- `ngram-mod` con 24/48/64 va meglio dei parametri attuali dei preset (24/24/86).
+- Il draft DFlash di williamliao non e' compatibile (acceptance ~1%): scartato.
+- math: MTP e' **spento** nel preset attuale; accenderlo e' il singolo guadagno piu' grosso.
+- Le run con ngram hanno alta varianza (dipende da quanto il testo ripete).
+
 ## Patch candidate (branch dedicati) - esiti
 
 | branch | patch | esito |
@@ -136,7 +163,8 @@ Nessuna delle due patch e' quindi adottata: i guadagni rimasti sono lato configu
 ## Da fare
 
 - [x] build+bench patch FA dkq256 (no win) e patch GDN (no-op su gfx1200)
-- [ ] spec decoding: MTP math (ora disattivato), varianti g12 (MTP/DFlash/ngram)
+- [x] spec decoding matrix: math MTP (da accendere), g12/g4 MTP+ngram-mod; DFlash scartato
+- [ ] applicare le config vincenti in preset.ini (mmproj su CPU, device per modello, spec)
 - [ ] sweep b/ub, threads, cache-ram/cache-reuse
 - [ ] A/B con binario prebuilt lemonade (TheRock, Clang 24) - scaricato in
       `~/.cache/llamacpp-rocm-b1333/extracted`
