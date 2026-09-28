@@ -154,6 +154,41 @@ llama serve --models-preset ~/.config/llama.cpp/preset.ini --models-max 1 \
 
 (`--threads 12` rimosso: sovrascriveva i `threads` dei preset.)
 
+## MTP adattivo (PR 27210) - valutato, non adottato
+
+La patch applica pulita sul nostro tree (branch `rx9060xt/patch-mtp-adaptive`,
+commit `4e2b3d639`) e builda. Ma sul nostro hardware non e' percorribile:
+
+- con `--spec-type draft-mtp-adaptive --spec-draft-n-max 12` il contesto MTP
+  non entra in VRAM: a 90k fallisce l'allocazione dei compute buffer, a 72k
+  addirittura la **rs cache da ~8 GB** (il batch di verifica ampio moltiplica
+  lo stato ricorrente dell'SSM; il contesto MTP ha la sua copia).
+- gia' il MTP fisso a n-max 3 non entra a 110k (serve ~630 MB in piu' dei n-max 2).
+- l'upstream l'ha misurato su 2x R9700 da 32 GB: li' c'e' spazio per i draft profondi.
+
+Conclusione: con un 27B ibrido SSM su 16 GB, il tetto pratico per il MTP e'
+**n-max 2**; la profondita' adattiva non ha spazio per esprimersi. Il branch
+resta come riferimento per il futuro (es. con un modello non-SSM, dove lo stato
+ricorrente non moltiplica la memoria, o su GPU con piu' VRAM).
+
+Confronto fixed-n2 misurato (math XXS, 110k/90k, stessi prompt): 67.6-68.0 t/s
+codice, 32.6-32.7 ragionamento, 164.7-165.0 codice ripetuto — riproducibile
+entro l'1%.
+
+## TOP_K su ROCm: costo irrilevante, ma grafi HIP rotti per quell'op
+
+Misurato con `test-backend-ops perf -o TOP_K`:
+
+- Vulkan: 2.0-27.6 us/run su tutte le forme testate (ne 2..65536, k 1..400).
+- ROCm: **SIGSEGV al secondo caso**, durante il "CUDA graph warmup" (la modalita'
+  test senza grafi passa 525/525). Coerente con la nota nel PR 28313: l'update
+  dei grafi HIP e' rotto upstream per TOP_K (in attesa di ROCm/rocm-systems#11069).
+
+Implicazioni: (a) il TOP_K non e' un collo di bottiglia per noi (us e' <0.5% di un
+token a 30 t/s), quindi il PR 28313 non serve; (b) se in futuro si abilita il
+**backend sampling** su ROCm conviene anche `GGML_CUDA_DISABLE_GRAPHS=1`, perche'
+quel percorso puo' toccare TOP_K con i grafi attivi.
+
 ## Variante IQ3_XXS del math (risparmio ~1 GB di pesi)
 
 La rs cache SSM (~1.8 GB) + MTP non entravano a contesto pieno con IQ3_S. Con IQ3_XXS
