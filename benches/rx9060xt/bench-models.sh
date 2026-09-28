@@ -103,6 +103,15 @@ for t in "${targets[@]}"; do
       run "$t fa=on" -m "$m" -ngl "$ngl" -fa on -ctk "$ctk" -ctv "$ctv" -t 12 -p 2048,8192 -n 128 "$@"
       run "$t fa=off" -m "$m" -ngl "$ngl" -fa off -ctk f16 -ctv f16 -t 12 -p 2048,8192 -n 128 "$@"
       ;;
+    nkvo)
+      # KV in system RAM (costo del "muro PCIe", baseline del KV streaming)
+      run "$t nkvo=1 kv in RAM (d 8192,32768)" \
+        -m "$m" -ngl "$ngl" -fa on -ctk "$ctk" -ctv "$ctv" -t 12 -nkvo 1 \
+        -p 512,8192 -n 128 -d 8192,32768 "$@"
+      run "$t nkvo=0 riferimento" \
+        -m "$m" -ngl "$ngl" -fa on -ctk "$ctk" -ctv "$ctv" -t 12 -nkvo 0 \
+        -p 512,8192 -n 128 -d 8192,32768 "$@"
+      ;;
     *)
       echo "suite sconosciuta: $suite" >&2; exit 1;;
   esac
