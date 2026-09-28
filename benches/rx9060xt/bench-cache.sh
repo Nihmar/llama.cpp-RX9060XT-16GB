@@ -35,7 +35,7 @@ srv_pid=$!
 trap 'kill $srv_pid 2>/dev/null || true' EXIT
 
 for i in $(seq 1 180); do
-  if curl -s -o /dev/null "http://127.0.0.1:$port/health"; then break; fi
+  if curl -sf -o /dev/null "http://127.0.0.1:$port/health"; then break; fi
   if ! kill -0 $srv_pid 2>/dev/null; then echo "server terminato, vedi $log" >&2; exit 1; fi
   sleep 1
 done
