@@ -1491,7 +1491,7 @@ void mul_mat_q_switch_J(ggml_backend_cuda_context & ctx, const mmq_args & args, 
     int J_best        = 0;
     int ntiles_J_best = INT_MAX;
 
-    for (int J = 8; J <= 128 && ntiles_J_best > 1; J += 8) {
+    for (int J = 8; J <= 256 && ntiles_J_best > 1; J += 8) {
         const ggml_cuda_mmq_config config = ggml_cuda_mmq_get_config(type, J, fallback, cc, prec_src1);
         if (config.type == GGML_TYPE_COUNT) {
             continue;
@@ -1557,6 +1557,9 @@ void mul_mat_q_switch_J(ggml_backend_cuda_context & ctx, const mmq_args & args, 
             break;
         case 128:
             launch_mul_mat_q<type, 128, fallback, prec_src1>(ctx, args, stream);
+            break;
+        case 256:
+            launch_mul_mat_q<type, 256, fallback, prec_src1>(ctx, args, stream);
             break;
         default:
             fprintf(stderr, "J_best=%d\n", J_best);
