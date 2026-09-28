@@ -45,9 +45,9 @@ run_config() {
   echo
 } > "$out"
 
-run_config "fixed-n2"       --spec-type draft-mtp,ngram-mod --spec-draft-n-max 2 || echo "fixed-n2 fallito"
-run_config "fixed-n3"       --spec-type draft-mtp,ngram-mod --spec-draft-n-max 3 || echo "fixed-n3 fallito"
-run_config "adaptive-12"    --spec-type draft-mtp-adaptive,ngram-mod --spec-draft-n-max 12 || echo "adaptive-12 fallito"
+run_config "n1" --spec-type draft-mtp,ngram-mod --spec-draft-n-max 1 --parallel 1 || echo "n1 fallito"
+run_config "n2" --spec-type draft-mtp,ngram-mod --spec-draft-n-max 2 --parallel 1 || echo "n2 fallito"
+run_config "n3" --spec-type draft-mtp,ngram-mod --spec-draft-n-max 3 --parallel 1 || echo "n3 fallito"
 
 echo
 echo "risultati in: $out"
