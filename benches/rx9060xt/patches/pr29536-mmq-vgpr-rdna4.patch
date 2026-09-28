@@ -1,0 +1,60 @@
+diff --git a/ggml/src/ggml-cuda/mma.cuh b/ggml/src/ggml-cuda/mma.cuh
+index 3583ba5e1..fc35803aa 100644
+--- a/ggml/src/ggml-cuda/mma.cuh
++++ b/ggml/src/ggml-cuda/mma.cuh
+@@ -1318,19 +1318,20 @@ namespace ggml_cuda_mma {
+     static __device__ __forceinline__ void mma(
+             tile<16, 16, float, dl_d> & D, const tile<16, 8, nv_bfloat162, dl_ab> & A, const tile<16, 8, nv_bfloat162, dl_ab> & B) {
+ #if defined(AMD_WMMA_AVAILABLE)
++        // The bf16 WMMA builtins take the bf16 bits as 16-bit integer vectors.
+ #if defined(RDNA4)
+-        using bf16x8_t = __attribute__((ext_vector_type(8))) __bf16;
++        using shortx8_t = __attribute__((ext_vector_type(8))) short;
+         using floatx8_t = __attribute__((ext_vector_type(8))) float;
+         floatx8_t& acc_frag = reinterpret_cast<floatx8_t&>(D.x[0]);
+-        const bf16x8_t& a_frag = reinterpret_cast<const bf16x8_t&>(A.x[0]);
+-        const bf16x8_t& b_frag = reinterpret_cast<const bf16x8_t&>(B.x[0]);
++        const shortx8_t& a_frag = reinterpret_cast<const shortx8_t&>(A.x[0]);
++        const shortx8_t& b_frag = reinterpret_cast<const shortx8_t&>(B.x[0]);
+         acc_frag = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(a_frag, b_frag, acc_frag);
+ #elif defined(RDNA3)
+-        using bf16x16_t = __attribute__((ext_vector_type(16))) __bf16;
++        using shortx16_t = __attribute__((ext_vector_type(16))) short;
+         using floatx8_t = __attribute__((ext_vector_type(8))) float;
+         floatx8_t& acc_frag = reinterpret_cast<floatx8_t&>(D.x[0]);
+-        const bf16x16_t& a_frag = reinterpret_cast<const bf16x16_t&>(A.x[0]);
+-        const bf16x16_t& b_frag = reinterpret_cast<const bf16x16_t&>(B.x[0]);
++        const shortx16_t& a_frag = reinterpret_cast<const shortx16_t&>(A.x[0]);
++        const shortx16_t& b_frag = reinterpret_cast<const shortx16_t&>(B.x[0]);
+         acc_frag = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(a_frag, b_frag, acc_frag);
+ #else
+         GGML_UNUSED_VARS(D, A, B);
+diff --git a/ggml/src/ggml-cuda/mmq-vec-dot.cuh b/ggml/src/ggml-cuda/mmq-vec-dot.cuh
+index 4ca6542d8..51ae44c67 100644
+--- a/ggml/src/ggml-cuda/mmq-vec-dot.cuh
++++ b/ggml/src/ggml-cuda/mmq-vec-dot.cuh
+@@ -162,6 +162,8 @@ static __device__ __forceinline__ void ggml_cuda_mmq_vec_dot_q8_0_q8_1_mma(
+ 
+     const int i0 = (threadIdx.y / ntx) * rows_per_warp;
+ 
++    // Keep the k01 loop rolled: unrolled, the hoisted loads exceed the VGPR budget and J >= 80 kernels spill on RDNA4.
++#pragma unroll 1
+     for (int k01 = 0; k01 < MMQ_TILE_NE_K; k01 += QI8_0) {
+         const int k0 = k00 + k01;
+ 
+@@ -495,6 +497,7 @@ template <ggml_type type, int J, bool fallback, ggml_prec prec_src1 = GGML_PREC_
+ 
+     const int i0 = (threadIdx.y / ntx) * rows_per_warp;
+ 
++#pragma unroll 1
+     for (int k01 = 0; k01 < MMQ_TILE_NE_K; k01 += 4) {
+         const int k0 = k00 + k01;
+ 
+@@ -693,6 +696,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
+ 
+     const int i0 = (threadIdx.y / ntx) * rows_per_warp;
+ 
++#pragma unroll 1
+     for (int k01 = 0; k01 < MMQ_TILE_NE_K; k01 += 4) {
+         const int k0 = k00 + k01;
+ 

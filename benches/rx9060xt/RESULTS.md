@@ -234,6 +234,69 @@ Scelte applicate nei preset:
   -> ~73 t/s di decode (3.7x rispetto a prima) mantenendo un contesto ampio.
 - `math-38-27b-long`: Vulkan, `c = 128000`, K q8_0, MTP+ngram -> 128k pieni, decode ~2x.
 
+## Patch MMQ VGPR (PR 29536) - testata, non adottata
+
+Il PR e' minuscolo (2 file, 11 righe): i builtin bf16 WMMA prendono i bit come
+vettori di short, e i loop k01 dei path MMQ q8_0/q8_1 restano rolled
+(`#pragma unroll 1`) perche' sui kernel con J >= 80 le load hoisted sforano il
+budget VGPR e spillano su RDNA4. Il nostro prefill sceglie **J = 128** per
+IQ3_S/IQ3_XXS, quindi teoricamente eravamo nel caso peggiore.
+
+Misurato (math XXS, pp @ d8192, r=3, correttezza MUL_MAT OK):
+
+| build | pp8192 @ d8192 | pp32768 @ d8192 |
+|---|---:|---:|
+| baseline (build-hip) | 484.95 | 439.59 |
+| con patch (build-hip-mmq) | 478.24 (-1.4%) | 434.27 (-1.2%) |
+
+Conclusione: con il compilatore AMD (ROCm 7.2.4, clang 22) quei kernel **non
+spillavano**; il `#pragma unroll 1` costa ~1%. Coerente con l'autore del PR
+("the same as with AMD's compiler"). Non adottata; il branch resta come
+riferimento per build con LLVM stock.
+
+## Stato finale applicato (preset)
+
+| voce | math-38-27b | math-38-27b-xxs | gemma-4-12b | gemma-4-e4b |
+|---|---|---|---|---|
+| backend | ROCm0 | ROCm0 | Vulkan0 | Vulkan0 |
+| quant | IQ3_S | IQ3_XXS | Q4_0 (QAT) | Q4_0 (QAT) |
+| contesto | 98304 (96k) | 131072 (128k) | 160000 | 16000 |
+| np | 1 | 1 | default | default |
+| KV | K q8_0 / V q4_0 | K q8_0 / V q4_0 | K q8_0 / V q4_0 | q4_0/q4_0 |
+| spec | draft-mtp,ngram-mod n2 | idem | draft-mtp,ngram-mod n2 | idem |
+| mmproj | CPU | CPU | CPU | CPU |
+| decode misurato | 78 t/s (codice) | 68 t/s | 117 t/s | 212 t/s |
+
+Il guadagno strutturale e' `np = 1`: la rs cache SSM si dimensiona come
+`n_seq_max × (1 + n_max)` righe e llama-server default a `n_parallel = 4`.
+Con np=1 si liberano ~1.4 GB, che abbiamo speso in contesto (96k/128k) e in K a
+q8_0 invece di q4_0. n-max resta 2 perche' misurato ottimale.
+
+## Roadmap ulteriore (analisi approfondita, in ordine di valore atteso)
+
+1. **MMQ J=256** (dimezza il dequant ridondante: con M=512 e J=128 il dequant dei
+   pesi si ripete 4 volte, una per j-tile; `mul_mat_q_switch_J` si ferma a 128).
+   Costo: righe di tabella + `case 256` + estensione del loop; ~55.8 KB di LDS
+   con I=64/J=256 sta nei 64 KB. Atteso 0-10% sul prefill. E' l'unico candidato
+   MMQ rimasto dopo i test negativi (C1 era un no-op a J=128: le tabelle RDNA4 e
+   RDNA3.5 coincidono li').
+2. **GDN chunked su gfx12**: tetto 1-4% (il GDN e' piccolo rispetto all'FFN),
+   costo 1-3 giorni di port dei layout WMMA. Non vale.
+3. **FA dkq256 kernel-only sul math** (head_dim 256): tetto ~2% sul prefill.
+4. **Vulkan (gemma)**: `GGML_VK_PERF_LOGGER=1` per il profilo per-op (da' forme FA
+   e GFLOPS dei MUL_MAT) + A/B dei knob mai testati: `GGML_VK_ALLOW_GRAPHICS_QUEUE`,
+   `GGML_VK_DISABLE_ASYNC`, `GGML_VK_DISABLE_COOPMAT`, `GGML_VK_DISABLE_MMVQ`.
+   Percorso FA attuale: coopmat1 in prefill; in decode coopmat1 per i layer GQA e
+   scalar per quelli a KV pieno.
+5. **Sistema**: verificare il performance level con `rocm-smi --showclocks
+   --showpower` (se e' in auto, forzare high), env `HSA_ENABLE_SDMA`,
+   `GPU_MAX_HW_QUEUES`, e threads/pinning CPU (conta per mmproj su CPU).
+
+Dove va il tempo (analisi del codice + misure): il prefill del math e' dominato
+dai **matmul** (FFN ~2/3 dei FLOP; attenzione ~5% a 32k di profondita'; GDN 1-4%)
+e giriamo a ~60% del picco MMA int8-equivalente. Il decode e' limitato
+dall'acceptance dello spec e dalla VRAM, non dai kernel.
+
 ## Patch candidate (branch dedicati) - esiti
 
 | branch | patch | esito |
