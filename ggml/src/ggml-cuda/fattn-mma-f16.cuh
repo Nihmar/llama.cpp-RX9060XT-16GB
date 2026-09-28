@@ -626,6 +626,16 @@ static __device__ __forceinline__ void flash_attn_ext_f16_iter(
     constexpr int stride_tile_V = V_is_K_view ? stride_tile_K : ggml_cuda_fattn_mma_get_stride_tile(nbatch_V2, swz);
 
     const int k_VKQ_0 = kb0 * nbatch_fa;
+
+#if defined(AMD_WMMA_AVAILABLE)
+    if constexpr (DKQ > 128) {
+        assert(((uintptr_t)K_h2 & 15) == 0 && "K_h2 must be 16-byte aligned");
+        assert(((uintptr_t)V_h2 & 15) == 0 && "V_h2 must be 16-byte aligned");
+        assert(((stride_K * sizeof(half2)) & 15) == 0 && "stride_K must be 16-byte aligned");
+        assert(((stride_V * sizeof(half2)) & 15) == 0 && "stride_V must be 16-byte aligned");
+    }
+#endif // AMD_WMMA_AVAILABLE
+
 #if defined(TURING_MMA_AVAILABLE)
     T_C_KQ KQ_C[nbatch_fa/(np*(cols_per_warp == 8 ? T_C_KQ::I : T_C_KQ::J))];
 #elif defined(AMD_WMMA_AVAILABLE) || defined(AMD_MFMA_AVAILABLE)
@@ -650,6 +660,12 @@ static __device__ __forceinline__ void flash_attn_ext_f16_iter(
             flash_attn_ext_f16_load_mask<ncols1, nwarps, nbatch_fa, use_cp_async, oob_check, use_sparse>
                 (mask_h, tile_mask, stride_mask, k_VKQ_0, k_VKQ_sup, jt*ncols1, ne01, indices);
         }
+#if defined(AMD_WMMA_AVAILABLE)
+        // For large head dims, K/V bypass LDS staging below so sync mask here.
+        if (DKQ > 128 && (ncols2 > 1 || mask_h)) {
+            __syncthreads();
+        }
+#endif // AMD_WMMA_AVAILABLE
     }
 
     // For MLA K and V have the same data.
@@ -659,6 +675,9 @@ static __device__ __forceinline__ void flash_attn_ext_f16_iter(
         const int k0_stop = k0_start + nbatch_K2 < DKQ/2 ? k0_start + nbatch_K2 : DKQ/2;
 
         if constexpr (nstages <= 1) {
+#if defined(AMD_WMMA_AVAILABLE)
+            if (DKQ <= 128) {
+#endif // AMD_WMMA_AVAILABLE
             const int k0_diff = k0_stop - k0_start;
             constexpr bool use_cp_async = nstages == 1;
             flash_attn_ext_f16_load_tile<stride_tile_K, swz, nwarps, nbatch_fa, use_cp_async, oob_check, use_sparse>
@@ -667,6 +686,9 @@ static __device__ __forceinline__ void flash_attn_ext_f16_iter(
                 cp_async_wait_all();
             }
             __syncthreads();
+#if defined(AMD_WMMA_AVAILABLE)
+            }
+#endif // AMD_WMMA_AVAILABLE
         }
 
         // Calculate tile of KQ:
@@ -677,6 +699,11 @@ static __device__ __forceinline__ void flash_attn_ext_f16_iter(
 #pragma unroll
                 for (int k_KQ_0 = k0_start; k_KQ_0 < k0_stop; k_KQ_0 += T_A_KQ::J) {
                     T_A_KQ K_A;
+#if defined(AMD_WMMA_AVAILABLE)
+                    if (DKQ > 128) {
+                        load_ldmatrix(K_A, K_h2 + int64_t(k_VKQ_0 + i_KQ_0)*stride_K + k_KQ_0, stride_K);
+                    } else
+#endif // AMD_WMMA_AVAILABLE
                     load_ldmatrix<swz>(K_A, tile_K, i_KQ_0, k_KQ_0 - k0_start, stride_tile_K);
                     if constexpr (cols_per_warp == 8) {
                         mma(KQ_C[i_KQ_00/(np*T_A_KQ::I)], K_A, Q_B[k_KQ_0/T_A_KQ::J]);
@@ -703,6 +730,11 @@ static __device__ __forceinline__ void flash_attn_ext_f16_iter(
                     const int i_KQ_0 = i_KQ_00 + (threadIdx.y % np)*T_A_KQ::I;
 
                     T_A_KQ K_A;
+#if defined(AMD_WMMA_AVAILABLE)
+                    if (DKQ > 128) {
+                        load_ldmatrix(K_A, K_h2 + int64_t(k_VKQ_0 + i_KQ_0)*stride_K + k_KQ_0, stride_K);
+                    } else
+#endif // AMD_WMMA_AVAILABLE
                     load_ldmatrix<swz>(K_A, tile_K, i_KQ_0, k_KQ_0 - k0_start, stride_tile_K);
 
                     if constexpr (cols_per_warp == 8) {
@@ -722,6 +754,9 @@ static __device__ __forceinline__ void flash_attn_ext_f16_iter(
         }
 
         if constexpr (nstages <= 1) {
+#if defined(AMD_WMMA_AVAILABLE)
+            if (DKQ <= 128)
+#endif // AMD_WMMA_AVAILABLE
             __syncthreads(); // Only needed if tile_K == tile_V.
         }
     }
@@ -1011,6 +1046,9 @@ static __device__ __forceinline__ void flash_attn_ext_f16_iter(
         const int i0_stop = i0_start + 2*nbatch_V2;
 
         if constexpr (nstages <= 1) {
+#if defined(AMD_WMMA_AVAILABLE)
+            if (DKQ <= 128) {
+#endif // AMD_WMMA_AVAILABLE
             const int i0_diff = i0_stop - i0_start;
             if (!V_is_K_view || i0_stop > 2*nbatch_K2) {
                 constexpr bool use_cp_async = nstages == 1;
@@ -1021,8 +1059,21 @@ static __device__ __forceinline__ void flash_attn_ext_f16_iter(
                 }
                 __syncthreads();
             }
+#if defined(AMD_WMMA_AVAILABLE)
+            }
+#endif // AMD_WMMA_AVAILABLE
         }
+#if defined(AMD_WMMA_AVAILABLE)
+        // For DKQ > 128 on AMD WMMA, K and V bypass LDS staging completely and are loaded
+        // directly from VRAM via V_h2. If V_is_K_view were set (e.g. MLA), V_h2 and K_h2 point
+        // to the same memory, so reading directly from V_h2 is always valid.
+        assert(!V_is_K_view || V_h2 == K_h2);
+        const half2 * tile_V_i = DKQ > 128 ?
+            V_h2 + int64_t(k_VKQ_0)*stride_V + i0_start/2 :
+            (!V_is_K_view || i0_stop > 2*nbatch_K2 ? tile_V : tile_V + i0_start/2);
+#else
         const half2 * tile_V_i = !V_is_K_view || i0_stop > 2*nbatch_K2 ? tile_V : tile_V + i0_start/2;
+#endif // AMD_WMMA_AVAILABLE
 
 #if defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE) || defined(AMD_MFMA_AVAILABLE)
 #pragma unroll
@@ -1033,6 +1084,11 @@ static __device__ __forceinline__ void flash_attn_ext_f16_iter(
                 const int k0 = k00 + (threadIdx.y % np)*T_A_VKQ::J;
 
                 T_A_VKQ A; // Transposed in SRAM but not in registers, gets transposed on load.
+#if defined(AMD_WMMA_AVAILABLE)
+                if (DKQ > 128) {
+                    load_ldmatrix_trans(A, tile_V_i + 2*k0*stride_V + (i_VKQ_0 - i0_start)/2, stride_V);
+                } else
+#endif // AMD_WMMA_AVAILABLE
                 load_ldmatrix_trans<swz>(A, tile_V, 2*k0, (int)(tile_V_i - tile_V) + (i_VKQ_0 - i0_start)/2, stride_tile_V);
                 if constexpr (T_B_KQ::I == 8) {
                     mma(VKQ_C[i_VKQ_0/T_A_VKQ::I], A, B[k00/(np*T_A_VKQ::J)]);
@@ -1067,6 +1123,9 @@ static __device__ __forceinline__ void flash_attn_ext_f16_iter(
 #endif // defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE) || defined(AMD_MFMA_AVAILABLE)
 
         if constexpr (nstages <= 1) {
+#if defined(AMD_WMMA_AVAILABLE)
+            if (DKQ <= 128)
+#endif // AMD_WMMA_AVAILABLE
             __syncthreads(); // Only needed if tile_K == tile_V.
         }
     }
