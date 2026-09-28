@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Build llama.cpp per RX 9060 XT 16GB (gfx1200).
 # usage: build.sh hip|vulkan|both [extra cmake args...]
+# env: BUILD_SUFFIX (es. "-fa") per build dir separate: build-hip-fa
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
 backend="${1:-hip}"
 shift || true
+suffix="${BUILD_SUFFIX:-}"
 
 export ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
 
@@ -22,7 +24,7 @@ fa_quants="f16-f16;q4_0-q4_0;q8_0-q8_0;bf16-bf16;q8_0-q4_0"
 
 case "$backend" in
   hip)
-    dir="$root/build-hip"
+    dir="$root/build-hip$suffix"
     extra=(
       -DGGML_HIP=ON
       -DGPU_TARGETS=gfx1200
@@ -31,11 +33,11 @@ case "$backend" in
     )
     ;;
   vulkan)
-    dir="$root/build-vulkan"
+    dir="$root/build-vulkan$suffix"
     extra=(-DGGML_VULKAN=ON)
     ;;
   both)
-    dir="$root/build-both"
+    dir="$root/build-both$suffix"
     extra=(
       -DGGML_HIP=ON
       -DGPU_TARGETS=gfx1200
