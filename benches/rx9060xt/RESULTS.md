@@ -264,6 +264,21 @@ A/B sulla suite base con gemma-4-12b (Vulkan/RADV):
   favore di Vulkan (+10% in profondita'), quindi la scelta di backend per i
   gemma regge.
 
+## Patch FA dkq256 sul math (head_dim 256) - testata, sotto soglia
+
+Il math ha attenzione con head_dim 256, quindi il bypass LDS della patch si applica
+(e' l'unico caso in cui non e' un no-op: la parte chooser non cambia nulla).
+Misurato a profondita' 32768 (le righe piu' attenzione-intensive):
+
+| build | pp8192 @ d32768 | pp32768 @ d32768 |
+|---|---:|---:|
+| baseline | 402.09 | 370.59 |
+| patch FA | 405.66 (+0.9%) | 375.71 (+1.4%) |
+
+Coerente col tetto previsto (~2%: l'attenzione e' ~5-10% del prefill a profondita').
+Non adottata (sotto la soglia del 3-5%), ma il branch `rx9060xt/patch-fa-dkq256`
+resta come candidato se in futuro l'attenzione pesera' di piu'.
+
 ## MMQ: tre esperimenti, tutti negativi (asse chiuso su HIP)
 
 1. **Tabelle RDNA4 vs RDNA3.5**: a J=128 (il nostro caso con M=512) usano la stessa
