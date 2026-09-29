@@ -9,6 +9,74 @@
 Dati grezzi: `benches/rx9060xt/results/*.md` (43 file). Riepilogo cumulativo: `RESULTS.md`.
 Preset finale: `preset.final.ini` (copia di `~/.config/llama.cpp/preset.ini`).
 
+## Configurazioni definitive (complete) per modello e backend
+
+Tutte le voci qui sotto sono **testate**. Quelle marcate *spedita* sono nel preset
+attivo (`preset.final.ini` = `~/.config/llama.cpp/preset.ini`); le altre sono le
+controprove sull'altro backend (stessi flag, cambia solo `device`).
+
+### Comuni a tutte le voci
+
+| parametro | valore |
+|---|---|
+| build | `benches/rx9060xt/build.sh both` (HIP+Vulkan, statico) |
+| `[*] c` / `ctk` / `ctv` | 128000 / q8_0 / q8_0 (i modelli sotto li sovrascrivono dove indicato) |
+| `jinja` / `reasoning-preserve` | true / true |
+| `chat-template-kwargs` | `{"reasoning_effort": "high"}`; math usa `xhigh` |
+| mmproj | **sempre su CPU** (`no-mmproj-offload = true`) |
+| KV draft (MTP) | `q4_0` / `q4_0` |
+| ngram (dove attivo) | n-match 24, n-min 48, n-max 64 |
+| comando serve | `llama serve --models-preset ~/.config/llama.cpp/preset.ini --models-max 1 --tools all --port 8181 --host 127.0.0.1` |
+
+### `math-38-27b` (Qwen3.8-27B)
+
+| parametro | IQ3_S su **ROCm** *spedita* | IQ3_S su **Vulkan** *spedita (long)* | IQ3_XXS su ROCm *spedita* | IQ3_XXS su Vulkan *spedita* |
+|---|---|---|---|---|
+| sezione preset | `math-38-27b` | `math-38-27b-long` | `math-38-27b-xxs` | `math-38-27b-xxs-vk` |
+| `device` | ROCm0 | Vulkan0 | ROCm0 | Vulkan0 |
+| contesto | **98304** | 128000 | **131072** | 131072 |
+| `np` | **1** | 1 | **1** | 1 |
+| KV | K q8_0 / V q4_0 | K q8_0 / V q4_0 | K q8_0 / V q4_0 | K q8_0 / V q4_0 |
+| `ngl` / `fa` / `fit` | 99 / on / on | idem | idem | idem |
+| `b` / `ub` | 8192 / 512 | idem | idem | idem |
+| spec | `draft-mtp,ngram-mod`, n-max **2** | idem | idem | idem |
+| `threads` | 8 / 8 | 8 / 8 | 8 / 8 | 8 / 8 |
+| cache | cache-prompt on, cache-reuse 0, cache-ram 0, no-cache-idle-slots | idem | idem | idem |
+| sampling | temp 1.0, top-p .95, min-p 0, top-k 20, presence 0, repeat 1.0 | idem | idem | idem |
+| reasoning-budget | 15000 + messaggio | idem | idem | idem |
+| VRAM a carico (MTP on) | 15.29 GiB | 15.25 GiB | 14.88 GiB | 13.68 GiB |
+
+### `gemma-4-12b`
+
+| parametro | su **Vulkan** *spedita* | su **ROCm** (controprova) |
+|---|---|---|
+| `device` | Vulkan0 | ROCm0 |
+| contesto | 160000 | 160000 |
+| `ngl` / `fa` | 999 / on | idem |
+| KV | K q8_0 (da `[*]`) / V q4_0 | idem |
+| spec | `draft-mtp,ngram-mod`, **n-max 3**, `spec-draft-p-min 0.1`, `-md mtp-gemma-4-12B-it.gguf` (auto dal router) | idem |
+| `threads` | 16 / 16 | idem |
+| cache / sampling | cache-prompt on; temp .7, top-p .95, top-k 64 | idem |
+| reasoning-budget | 10000 + messaggio | idem |
+| VRAM a carico (MTP on) | **8.20 GiB** | 8.95 GiB |
+
+### `gemma-4-e4b`
+
+| parametro | su **Vulkan** *spedita* | su **ROCm** (controprova) |
+|---|---|---|
+| `device` | Vulkan0 | ROCm0 |
+| contesto | 16000 | 16000 |
+| `ngl` / `fa` | 999 / on | idem |
+| KV | q4_0 / q4_0 | idem |
+| spec | `draft-mtp,ngram-mod`, n-max 2, p-min 0.1, `-md mtp-gemma-4-E4B-it.gguf` | idem |
+| `threads` | 8 / 8 | idem |
+| cache / sampling | cache-prompt on, cache-reuse 0, cache-ram 0, no-cache-idle-slots; temp 1.0, top-p .95, top-k 64 | idem |
+| reasoning-budget | 1000 + messaggio | idem |
+| VRAM a carico (MTP on) | **2.80 GiB** | 3.16 GiB |
+
+(Il `device` e' l'unica differenza tra le due colonne: sono le configurazioni usate
+nella matrice qui sotto.)
+
 ## Matrice completa: backend x modello x profondita' x tipo di testo x VRAM
 
 Misurata con un unico binario (HIP+Vulkan) selezionando `--device`, stesso KV,
@@ -18,14 +86,18 @@ stessi flag MTP (n-max per modello), `np=1`. File grezzo: `results/matrix-*.md`.
 
 | config | ctx | d0 | @d8192 | @d32768 |
 |---|---:|---:|---:|---:|
-| math ROCm | 96k | 594.6 | 546.7 | **442.7** |
-| math Vulkan | 128k | 585.8 | 500.5 | 351.7 |
+| math IQ3_S ROCm | 96k | 594.6 | 546.7 | **442.7** |
+| math IQ3_S Vulkan | 128k | 585.8 | 500.5 | 351.7 |
+| math IQ3_XXS ROCm | 128k | 521.9 | 485.1 | 400.8 |
+| math IQ3_XXS Vulkan | 128k | 594.2 | 506.5 | 354.4 |
 | g12 ROCm | 160k | 1267.4 | 903.8 | 482.7 |
 | g12 Vulkan | 160k | 1286.6 | **964.4** | **538.0** |
 | g4 ROCm | 16k | 2908.7 | 2025.2 | - |
 | g4 Vulkan | 16k | 2907.0 | **2150.7** | - |
 
-- math: pari a contesto vuoto, **ROCm +26% a 32k di profondita'** (e il divario cresce).
+- math: pari a contesto vuoto, **ROCm +26% a 32k di profondita'** (e il divario cresce);
+  l'IQ3_XXS paga ~9% di prefill rispetto all'IQ3_S su ROCm (mix di tensor diverso per MMQ),
+  ma libera ~1 GB di VRAM.
 - g12: **Vulkan avanti a tutte le profondita'** (+2% / +7% / +11%).
 - g4: pari a vuoto, **Vulkan +6% a 8k**.
 
@@ -33,19 +105,24 @@ stessi flag MTP (n-max per modello), `np=1`. File grezzo: `results/matrix-*.md`.
 
 | config | VRAM a carico (off -> on) | codice | ripetitivo | prosa |
 |---|---|---:|---:|---:|
-| math ROCm 96k | 13.99 -> **15.29 GiB** | 19.5 -> **31.5** (+62%) | 19.8 -> **46.5** (+135%) | 19.8 -> **34.8** (+76%) |
-| math Vulkan 128k | 14.29 -> 15.25 GiB | 20.7 -> 34.1 (+65%) | ferma subito (EOS) | 20.9 -> 37.1 (+78%) |
-| g12 ROCm 160k | 8.22 -> 8.95 GiB | 34.1 -> 102.0 (+199%) | 34.8 -> **194.0** (+457%) | 35.3 -> 229.3 (+550%) |
-| g12 Vulkan 160k | **7.77 -> 8.20 GiB** | 33.8 -> **147.7** (+337%) | 34.3 -> 81.1 (+136%) | 34.8 -> **256.4** (+637%) |
-| g4 ROCm 16k | 3.02 -> 3.16 GiB | 58.5 -> 101.7 (+74%) | 60.6 -> 116.5 (+92%) | 61.8 -> 71.8 (+16%) |
-| g4 Vulkan 16k | **2.72 -> 2.80 GiB** | 69.0 -> **113.9** (+65%) | 68.6 -> **142.9** (+108%) | 70.3 -> **85.9** (+22%) |
+| math IQ3_S ROCm 96k | 13.99 -> 15.29 GiB | 19.5 -> 31.5 | 19.8 -> 46.5 | 19.8 -> 34.8 |
+| math IQ3_S Vulkan 128k | 14.29 -> 15.25 GiB | 20.7 -> 34.1 | ferma subito (EOS) | 20.9 -> 37.1 |
+| math IQ3_XXS ROCm 128k | 13.39 -> **14.88 GiB** | 20.4 -> **67.1** | 20.7 -> 34.9 | 20.7 -> 31.8 |
+| math IQ3_XXS Vulkan 128k | 12.73 -> **13.68 GiB** | 22.9 -> 63.4 | 23.0 -> 40.8 | 23.1 -> 36.0 |
+| g12 ROCm 160k | 8.22 -> 8.95 GiB | 34.1 -> 102.0 | 34.8 -> **194.0** | 35.3 -> 229.3 |
+| g12 Vulkan 160k | **7.77 -> 8.20 GiB** | 33.8 -> **147.7** | 34.3 -> 81.1 | 34.8 -> **256.4** |
+| g4 ROCm 16k | 3.02 -> 3.16 GiB | 58.5 -> 101.7 | 60.6 -> 116.5 | 61.8 -> 71.8 |
+| g4 Vulkan 16k | **2.72 -> 2.80 GiB** | 69.0 -> **113.9** | 68.6 -> **142.9** | 70.3 -> **85.9** |
 
 Letture:
 - **MTP aiuta su tutti i tipi di testo**, ma con ampiezze molto diverse: sul ripetitivo
   (log/CSV) e sulla prosa i draft vengono accettati molto piu' spesso che sul codice
   "nuovo" (acceptance 30% sul codice vs 90-99% su ripetitivo/prosa per g12).
-- **Il contesto MTP costa VRAM**: +1.3 GiB sul math (SSM), +0.73/0.43 GiB su g12,
-  +0.14/+0.08 GiB su g4. Sul math e' il vincolo che limita contesto e profondita' di draft.
+- **Il contesto MTP costa VRAM**: +1.2-1.3 GiB sul math (SSM, IQ3_S e XXS), +0.73/0.43
+  GiB su g12, +0.14/+0.08 su g4. Sul math e' il vincolo che limita contesto e profondita'.
+- **IQ3_XXS conviene se conta la VRAM**: 13.68 GiB su Vulkan (il piu' basso dei math)
+  contro 15.25 dell'IQ3_S, e permette 128k su ROCm dove l'IQ3_S si ferma a 96k; il
+  prefill pero' e' ~9% piu' lento su ROCm. IQ3_S resta la scelta "qualita'".
 - **g4: Vulkan vince su tutto** (piu' veloce e ~0.3 GiB in meno). g12: Vulkan vince su
   codice/prosa e sul prefill, ROCm sul ripetitivo (194 vs 81) — ma il prefill profondo
   resta il discriminante stabile, quindi Vulkan.

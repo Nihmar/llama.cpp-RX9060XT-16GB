@@ -18,6 +18,7 @@ G12="$M/models--unsloth--gemma-4-12B-it-qat-GGUF/snapshots/980b060c40a8539ac159e
 MTP12="$M/models--unsloth--gemma-4-12B-it-qat-GGUF/snapshots/980b060c40a8539ac159e0501a3e0f66a6365af3/mtp-gemma-4-12B-it.gguf"
 G4="$M/models--unsloth--gemma-4-E4B-it-qat-GGUF/snapshots/8c5a9e4fd5482e2be20fe0bf013b4c262a8f4265/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf"
 MTP4="$M/models--unsloth--gemma-4-E4B-it-qat-GGUF/snapshots/8c5a9e4fd5482e2be20fe0bf013b4c262a8f4265/mtp-gemma-4-E4B-it.gguf"
+MATHX="$M/models--ISTA-DASLab--Qwen3.8-27B-GSQ-RCO-GGUF/snapshots/d562806dbafae37109975e970aae91b43e73b440/Qwen3.8-27B-GSQ-RCO-IQ3_XXS-mtp.gguf"
 
 wait_vram() {
   for i in $(seq 1 90); do
@@ -29,7 +30,7 @@ wait_vram() {
 
 config() {   # key model device ctx ctk ctv nmax md depth-list
   local key="$1" model="$2" dev="$3" ctx="$4" ctk="$5" ctv="$6" nmax="$7" mdf="$8" depths="$9"
-  [ -n "$only" ] && [ "$only" != "$key" ] && return 0
+  if [ -n "$only" ] && [[ ",$only," != *",$key,"* ]]; then return 0; fi
   echo "########## $key ##########" >&2
   { echo "## $key"; echo; echo "- modello: \`$(basename "$model")\`"; echo "- device: $dev, ctx: $ctx, KV: $ctk/$ctv, MTP n-max: $nmax"; echo; } >> "$out"
 
@@ -66,6 +67,8 @@ config() {   # key model device ctx ctk ctv nmax md depth-list
 
 config math-rocm  "$MATH" ROCm0   98304  q8_0 q4_0 2 ""        "0,8192,32768"
 config math-vk    "$MATH" Vulkan0 131072 q8_0 q4_0 2 ""        "0,8192,32768"
+config math-xxs-rocm "$MATHX" ROCm0   131072 q8_0 q4_0 2 ""    "0,8192,32768"
+config math-xxs-vk   "$MATHX" Vulkan0 131072 q8_0 q4_0 2 ""    "0,8192,32768"
 config g12-rocm   "$G12"  ROCm0   160000 q8_0 q4_0 3 "$MTP12"  "0,8192,32768"
 config g12-vk     "$G12"  Vulkan0 160000 q8_0 q4_0 3 "$MTP12"  "0,8192,32768"
 config g4-rocm    "$G4"   ROCm0   16384  q4_0 q4_0 2 "$MTP4"   "0,8192"
