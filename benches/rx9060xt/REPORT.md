@@ -9,6 +9,50 @@
 Dati grezzi: `benches/rx9060xt/results/*.md` (43 file). Riepilogo cumulativo: `RESULTS.md`.
 Preset finale: `preset.final.ini` (copia di `~/.config/llama.cpp/preset.ini`).
 
+## Matrice completa: backend x modello x profondita' x tipo di testo x VRAM
+
+Misurata con un unico binario (HIP+Vulkan) selezionando `--device`, stesso KV,
+stessi flag MTP (n-max per modello), `np=1`. File grezzo: `results/matrix-*.md`.
+
+### Prefill, t/s (llama-bench, pp8192 a profondita' crescente)
+
+| config | ctx | d0 | @d8192 | @d32768 |
+|---|---:|---:|---:|---:|
+| math ROCm | 96k | 594.6 | 546.7 | **442.7** |
+| math Vulkan | 128k | 585.8 | 500.5 | 351.7 |
+| g12 ROCm | 160k | 1267.4 | 903.8 | 482.7 |
+| g12 Vulkan | 160k | 1286.6 | **964.4** | **538.0** |
+| g4 ROCm | 16k | 2908.7 | 2025.2 | - |
+| g4 Vulkan | 16k | 2907.0 | **2150.7** | - |
+
+- math: pari a contesto vuoto, **ROCm +26% a 32k di profondita'** (e il divario cresce).
+- g12: **Vulkan avanti a tutte le profondita'** (+2% / +7% / +11%).
+- g4: pari a vuoto, **Vulkan +6% a 8k**.
+
+### Decode, t/s (192 token, greedy) - spec OFF -> spec ON (MTP+ngram)
+
+| config | VRAM a carico (off -> on) | codice | ripetitivo | prosa |
+|---|---|---:|---:|---:|
+| math ROCm 96k | 13.99 -> **15.29 GiB** | 19.5 -> **31.5** (+62%) | 19.8 -> **46.5** (+135%) | 19.8 -> **34.8** (+76%) |
+| math Vulkan 128k | 14.29 -> 15.25 GiB | 20.7 -> 34.1 (+65%) | ferma subito (EOS) | 20.9 -> 37.1 (+78%) |
+| g12 ROCm 160k | 8.22 -> 8.95 GiB | 34.1 -> 102.0 (+199%) | 34.8 -> **194.0** (+457%) | 35.3 -> 229.3 (+550%) |
+| g12 Vulkan 160k | **7.77 -> 8.20 GiB** | 33.8 -> **147.7** (+337%) | 34.3 -> 81.1 (+136%) | 34.8 -> **256.4** (+637%) |
+| g4 ROCm 16k | 3.02 -> 3.16 GiB | 58.5 -> 101.7 (+74%) | 60.6 -> 116.5 (+92%) | 61.8 -> 71.8 (+16%) |
+| g4 Vulkan 16k | **2.72 -> 2.80 GiB** | 69.0 -> **113.9** (+65%) | 68.6 -> **142.9** (+108%) | 70.3 -> **85.9** (+22%) |
+
+Letture:
+- **MTP aiuta su tutti i tipi di testo**, ma con ampiezze molto diverse: sul ripetitivo
+  (log/CSV) e sulla prosa i draft vengono accettati molto piu' spesso che sul codice
+  "nuovo" (acceptance 30% sul codice vs 90-99% su ripetitivo/prosa per g12).
+- **Il contesto MTP costa VRAM**: +1.3 GiB sul math (SSM), +0.73/0.43 GiB su g12,
+  +0.14/+0.08 GiB su g4. Sul math e' il vincolo che limita contesto e profondita' di draft.
+- **g4: Vulkan vince su tutto** (piu' veloce e ~0.3 GiB in meno). g12: Vulkan vince su
+  codice/prosa e sul prefill, ROCm sul ripetitivo (194 vs 81) — ma il prefill profondo
+  resta il discriminante stabile, quindi Vulkan.
+- math: a contesto vuoto sono pari; a profondita' ROCm vince. L'unico artefatto e' il
+  prompt ripetitivo su Vulkan, dove il modello emette EOS al primo token (differenza
+  numerica tra kernel: nessun errore, semplicemente non genera).
+
 ## Configurazione: `math-38-27b` (Qwen3.8-27B, ibrido SSM)
 
 Prima girava su **Vulkan** (l'unico backend del binario precedente), 128k, **MTP spento**.
